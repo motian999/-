@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>北京像素大冒险 · 春</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#2d1b33;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:'Courier New',monospace}
+h1{color:#ffb7d5;font-size:1.4rem;letter-spacing:3px;text-shadow:2px 2px #1a0a1a,0 0 15px rgba(255,183,213,0.4);margin-bottom:8px}
+canvas{border:4px solid #d4849a;box-shadow:4px 4px 0 #1a0a1a,0 0 30px rgba(255,150,200,0.2);image-rendering:pixelated;cursor:none}
+.hud{display:flex;gap:12px;margin-bottom:8px}
+.hud-item{background:#3d1f33;border:2px solid #d4849a;padding:4px 14px;color:#e8c0d0;font-size:0.8rem;box-shadow:2px 2px 0 #1a0a1a}
+.hud-item span{color:#ffdd57}
+.hint{margin-top:8px;background:#3d1f33;border:2px solid #8a5070;padding:6px 16px;color:#c8a0b8;font-size:0.7rem;box-shadow:2px 2px 0 #1a0a1a}
+.hint span{color:#ffdd57}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(30,10,20,0.85);display:none;align-items:center;justify-content:center;z-index:100}
+.modal.active{display:flex}
+.modal-content{background:#3d1f33;border:4px solid #ffdd57;box-shadow:4px 4px 0 #1a0a1a,0 0 40px rgba(255,221,87,0.15);max-width:520px;width:90%}
+.modal-header{background:#2d1520;padding:10px 15px;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #ffdd57}
+.modal-header h2{color:#ffdd57;font-size:1rem;letter-spacing:2px}
+.modal-close{width:24px;height:24px;background:#e74c6c;border:2px solid #ff6b8a;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.modal-close:hover{background:#ff6b8a}
+.modal-body{padding:15px}
+.modal-image{width:100%;height:180px;object-fit:cover;border:3px solid #8a5070;margin-bottom:12px;image-rendering:auto}
+.modal-desc{color:#e8c0d0;line-height:1.8;font-size:0.85rem}
+.clear-screen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(30,10,20,0.92);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:200}
+.clear-screen.active{display:flex}
+.clear-screen h1{font-size:2.5rem;color:#ffdd57;animation:glow 1.5s ease-in-out infinite alternate}
+.clear-screen p{color:#e8c0d0;margin-top:15px;font-size:1rem}
+.clear-screen button{margin-top:25px;background:#ffdd57;border:none;padding:10px 30px;font-size:1rem;cursor:pointer;font-family:inherit;box-shadow:3px 3px 0 #1a0a1a;color:#2d1b33;font-weight:bold}
+@keyframes glow{from{text-shadow:0 0 10px #ffdd57}to{text-shadow:0 0 30px #ffdd57,0 0 50px #ffb7d5}}
+</style>
+</head>
+<body>
+<h1>🌸 北京像素大冒险 · 春 🌸</h1>
+<div class="hud">
+<div class="hud-item">🌸 景点: <span id="collected">0</span>/10</div>
+<div class="hud-item">📍 <span id="location">起点</span></div>
+<div class="hud-item" id="interact-hint" style="display:none;color:#7fff7f;border-color:#7fff7f">按 <span>E</span> 查看</div>
+</div>
+<canvas id="game" width="800" height="500"></canvas>
+<div class="hint"><span>← →</span> / <span>A D</span> 行走 | 靠近景点按 <span>E</span> 或 <span>点击</span> 查看 | <span>ESC</span> 关闭 | 收集10个或到达终点通关</div>
+
+<div class="modal" id="modal">
+<div class="modal-content">
+<div class="modal-header"><h2 id="modalTitle"></h2><button class="modal-close" onclick="closeModal()">✕</button></div>
+<div class="modal-body"><img class="modal-image" id="modalImage" src="" alt=""><p class="modal-desc" id="modalDesc"></p></div>
+</div>
+</div>
+
+<div class="clear-screen" id="clearScreen">
+<h1>🌸 通关！🌸</h1>
+<p id="clearMsg">太棒了喵！</p>
+<button onclick="restartGame()">再来一次</button>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const W = 800, H = 500;
+const GROUND_Y = 440;
+const MAP_WIDTH = 5000;
+
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x - camera.x), Math.floor(y), w, h);
+}
+
+// 景点数据
+const spots = [
+  {id:1, name:"故宫", x:350, w:280,
+   img:"https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=600&q=80",
+   desc:"故宫又称紫禁城，位于北京中轴线中心，是明清两代皇家宫殿。始建于1406年，占地72万平方米，有宫殿七十多座，房屋九千余间。世界现存规模最大、保存最完整的木质结构古建筑群，1987年列为世界文化遗产。"},
+  {id:2, name:"天坛", x:800, w:240,
+   img:"https://images.unsplash.com/photo-1599571234909-29ed5d1321d6?w=600&q=80",
+   desc:"天坛位于北京南部，是明清皇帝祭天祈谷的场所，始建于1420年。主要建筑包括圜丘坛、祈年殿和皇穹宇。祈年殿高38米，三重檐圆形建筑。体现'天圆地方'宇宙观，1998年列为世界文化遗产。"},
+  {id:3, name:"长城", x:1280, w:300,
+   img:"https://images.unsplash.com/photo-1508804057556-31ec43d3c3f3?w=600&q=80",
+   desc:"万里长城是中国古代军事防御工程，北京段八达岭和慕田峪最著名。始建于春秋战国，经多朝修缮，总长超2万公里。八达岭海拔1015米，是明长城精华段，1987年列为世界文化遗产。"},
+  {id:4, name:"颐和园", x:1750, w:280,
+   img:"https://images.unsplash.com/photo-1584711445678-de1e4b1b2e98?w=600&q=80",
+   desc:"颐和园位于北京西北郊，是中国现存最大皇家园林，占地290公顷。以昆明湖和万寿山为基础，建筑以佛香阁为中心。长廊、石舫、十七孔桥等景观闻名，1998年列为世界文化遗产。"},
+  {id:5, name:"鸟巢水立方", x:2200, w:280,
+   img:"https://images.unsplash.com/photo-1573455494060-c5595004fb6c?w=600&q=80",
+   desc:"国家体育场（鸟巢）和国家游泳中心（水立方）位于奥林匹克公园，是2008年奥运主场馆。鸟巢可容纳9.1万观众。水立方以独特ETFE膜结构气泡造型闻名。"},
+  {id:6, name:"圆明园", x:2650, w:260,
+   img:"https://images.unsplash.com/photo-1599161686883-92c6a7a08a98?w=600&q=80",
+   desc:"圆明园位于北京西北郊，是清代大型皇家园林，由圆明园、长春园和绮春园组成，被誉为'万园之园'。1860年遭英法联军焚毁，现仅存遗址，是爱国主义教育重要基地。"},
+  {id:7, name:"北海公园", x:3100, w:260,
+   img:"https://images.unsplash.com/photo-1567604160575-5c3c9a48a6e1?w=600&q=80",
+   desc:"北海公园位于北京中心，是中国现存最古老完整的皇家园林之一，始建于辽代，近千年历史。以琼华岛和白塔最著名，'让我们荡起双桨'描写的就是北海景象。"},
+  {id:8, name:"雍和宫", x:3520, w:260,
+   img:"https://images.unsplash.com/photo-1609766856923-7e0a7a3b2d4f?w=600&q=80",
+   desc:"雍和宫位于东城区，是北京最大藏传佛教寺院，始建于1694年。原为雍正府邸，后改为喇嘛庙。万福阁内有18米高弥勒大佛，由一整根白檀木雕刻而成。"},
+  {id:9, name:"景山公园", x:3950, w:260,
+   img:"https://images.unsplash.com/photo-1584711445678-de1e4b1b2e98?w=600&q=80",
+   desc:"景山公园位于故宫北面，是北京城最高点。山顶五座山峰各有亭子，万春亭是观看故宫全景最佳位置。从亭中俯瞰紫禁城金黄琉璃瓦尽收眼底。"},
+  {id:10,name:"国子监", x:4350, w:260,
+   img:"https://images.unsplash.com/photo-1583225429666-b9ab6fda6a12?w=600&q=80",
+   desc:"国子监位于东城区，是元明清三代最高学府和教育管理机构，始建于1306年。辟雍大殿是核心建筑，方形重檐攒尖顶，四周环水，象征'辟雍'古制。"}
+];
+
+// 猫角色 - 脚底在 GROUND_Y
+const CAT_H = 36; // 猫实际绘制高度
+const player = {x: 60, y: GROUND_Y - CAT_H, w: 24, h: CAT_H, dir: 1, frame: 0, walkTimer: 0, speed: 3, moving: false};
+const camera = {x: 0};
+let collected = new Set();
+let keys = {};
+let nearSpot = null;
+let gameOver = false;
+let petals = [];
+
+for(let i = 0; i < 80; i++) {
+  petals.push({
+    x: Math.random() * MAP_WIDTH,
+    y: Math.random() * GROUND_Y,
+    vx: -0.3 - Math.random() * 0.5,
+    vy: 0.3 + Math.random() * 0.5,
+    size: 2 + Math.random() * 3,
+    color: Math.random() > 0.5 ? '#ffb7d5' : '#ffd1e3'
+  });
+}
+
+// ========== 天空 ==========
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  g.addColorStop(0, '#ffc8dd');
+  g.addColorStop(0.3, '#ffafcc');
+  g.addColorStop(0.6, '#ffd6e8');
+  g.addColorStop(1, '#e8f5e1');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, GROUND_Y);
+}
+
+// ========== 云朵 ==========
+function drawClouds() {
+  const data = [{x:80,y:30,s:1.4},{x:350,y:15,s:1.6},{x:600,y:40,s:1.1},{x:900,y:20,s:1.5},{x:1200,y:35,s:1.3},{x:1500,y:18,s:1.6},{x:1800,y:30,s:1.2},{x:2100,y:25,s:1.5},{x:2400,y:35,s:1},{x:2700,y:15,s:1.4},{x:3000,y:30,s:1.7},{x:3300,y:22,s:1.3},{x:3600,y:40,s:1.5},{x:3900,y:18,s:1.2},{x:4200,y:32,s:1.4}];
+  data.forEach(c => {
+    const cx = c.x - camera.x * 0.2;
+    const wx = ((cx % 1000) + 1000) % 1000 - 100;
+    const s = c.s;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(Math.floor(wx), c.y, Math.floor(55*s), Math.floor(16*s));
+    ctx.fillRect(Math.floor(wx+12*s), c.y-12*s, Math.floor(32*s), Math.floor(14*s));
+    ctx.fillRect(Math.floor(wx+6*s), c.y-18*s, Math.floor(22*s), Math.floor(8*s));
+    ctx.fillRect(Math.floor(wx+22*s), c.y-14*s, Math.floor(28*s), Math.floor(16*s));
+  });
+}
+
+// ========== 远景山 ==========
+function drawMountains() {
+  ctx.fillStyle = '#e8c8d8';
+  for(let i = 0; i < 15; i++) {
+    const mx = i * 350 - (camera.x * 0.12) % 350;
+    ctx.beginPath();
+    ctx.moveTo(mx, GROUND_Y);
+    ctx.lineTo(mx + 80, GROUND_Y - 55);
+    ctx.lineTo(mx + 175, GROUND_Y - 28);
+    ctx.lineTo(mx + 260, GROUND_Y - 65);
+    ctx.lineTo(mx + 350, GROUND_Y);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#f0d0e0';
+  for(let i = 0; i < 18; i++) {
+    const mx = i * 280 - (camera.x * 0.25) % 280;
+    ctx.beginPath();
+    ctx.moveTo(mx, GROUND_Y);
+    ctx.lineTo(mx + 60, GROUND_Y - 32);
+    ctx.lineTo(mx + 140, GROUND_Y - 16);
+    ctx.lineTo(mx + 210, GROUND_Y - 38);
+    ctx.lineTo(mx + 280, GROUND_Y);
+    ctx.fill();
+  }
+}
+
+// ========== 地面 ==========
+function drawGround() {
+  const gg = ctx.createLinearGradient(0, GROUND_Y, 0, GROUND_Y + 12);
+  gg.addColorStop(0, '#7dc86a');
+  gg.addColorStop(1, '#5aaa48');
+  ctx.fillStyle = gg;
+  ctx.fillRect(0, GROUND_Y, W, 12);
+  ctx.fillStyle = '#a08050';
+  ctx.fillRect(0, GROUND_Y + 12, W, 48);
+  for(let i = 0; i < 60; i++) {
+    const gx = ((i * 16 - camera.x % 16) % W + W) % W;
+    ctx.fillStyle = '#8a6a3a';
+    ctx.fillRect(Math.floor(gx), GROUND_Y + 20, 4, 4);
+    ctx.fillStyle = '#7a5a2a';
+    ctx.fillRect(Math.floor(gx + 8), GROUND_Y + 38, 3, 3);
+  }
+  // 花草
+  const colors = ['#ff69b4','#ffdd57','#ff8c42','#b388ff','#64ffda'];
+  for(let i = 0; i < 100; i++) {
+    const gx = ((i * 10 - camera.x % 10) % W + W) % W;
+    ctx.fillStyle = '#5a9a3a';
+    ctx.fillRect(Math.floor(gx), GROUND_Y - 4, 2, 5);
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(Math.floor(gx), GROUND_Y - 6, 3, 3);
+  }
+}
+
+// ========== 樱花树（大型）==========
+function drawSakuraTree(sx, sy, size) {
+  const x = sx - camera.x;
+  if(x < -80 || x > W + 80) return;
+  const s = size || 1;
+  // 树干
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(Math.floor(sx - camera.x - 5*s), Math.floor(sy - 50*s), Math.floor(10*s), Math.floor(50*s));
+  ctx.fillStyle = '#A0714F';
+  ctx.fillRect(Math.floor(sx - camera.x - 2*s), Math.floor(sy - 48*s), Math.floor(4*s), Math.floor(46*s));
+  // 分枝
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(Math.floor(sx - camera.x - 20*s), Math.floor(sy - 52*s), Math.floor(18*s), Math.floor(5*s));
+  ctx.fillRect(Math.floor(sx - camera.x + 8*s), Math.floor(sy - 56*s), Math.floor(18*s), Math.floor(5*s));
+  // 樱花团 - 大型
+  const bc = ['#ffb7d5','#ff99c8','#ffc8dd','#ffd6e8','#ff8fab'];
+  ctx.fillStyle = '#ffb7d5';
+  ctx.fillRect(Math.floor(sx - camera.x - 30*s), Math.floor(sy - 90*s), Math.floor(60*s), Math.floor(40*s));
+  ctx.fillStyle = '#ff99c8';
+  ctx.fillRect(Math.floor(sx - camera.x - 24*s), Math.floor(sy - 105*s), Math.floor(48*s), Math.floor(20*s));
+  ctx.fillStyle = '#ffc8dd';
+  ctx.fillRect(Math.floor(sx - camera.x - 18*s), Math.floor(sy - 115*s), Math.floor(36*s), Math.floor(14*s));
+  ctx.fillStyle = '#ff8fab';
+  ctx.fillRect(Math.floor(sx - camera.x - 32*s), Math.floor(sy - 78*s), Math.floor(26*s), Math.floor(22*s));
+  ctx.fillStyle = '#ffb7d5';
+  ctx.fillRect(Math.floor(sx - camera.x + 12*s), Math.floor(sy - 82*s), Math.floor(24*s), Math.floor(26*s));
+  // 高光
+  ctx.fillStyle = '#ffd6e8';
+  for(let i = 0; i < 15; i++) {
+    const bx = sx - camera.x + (Math.sin(i*2.3)*28*s);
+    const by = sy - 60*s - Math.abs(Math.cos(i*1.7))*40*s;
+    ctx.fillRect(Math.floor(bx), Math.floor(by), Math.floor(4*s), Math.floor(4*s));
+  }
+}
+
+// 小花丛
+function drawFlowerPatch(sx, sy) {
+  const x = sx - camera.x;
+  if(x < -30 || x > W + 30) return;
+  const colors = ['#ff69b4','#ffdd57','#ff8c42','#b388ff','#64ffda','#ffb7d5'];
+  for(let i = 0; i < 7; i++) {
+    const fx = sx - 14 + i * 5;
+    ctx.fillStyle = '#5a9a3a';
+    ctx.fillRect(Math.floor(fx - camera.x), Math.floor(sy - 8), 2, 8);
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(Math.floor(fx - camera.x - 1), Math.floor(sy - 10 - (i%3)*2), 4, 4);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(Math.floor(fx - camera.x), Math.floor(sy - 9 - (i%3)*2), 2, 2);
+  }
+}
+
+// ========== 景点像素建筑（超大占满屏幕版）==========
+function drawSpotBuilding(spot) {
+  const sx = spot.x;
+  const x = sx - camera.x;
+  if(x < -350 || x > W + 350) return;
+  const gy = GROUND_Y;
+  const S = 3; // 基础像素单位放大
+
+  switch(spot.id) {
+    case 1: { // ====== 故宫 - 超大太和殿 ======
+      // 大台基（三层汉白玉）
+      ctx.fillStyle = '#f5e6c8';
+      ctx.fillRect(Math.floor(x-40), gy-50, 360, 50);
+      ctx.fillStyle = '#e8d5a8';
+      ctx.fillRect(Math.floor(x-25), gy-42, 330, 35);
+      ctx.fillStyle = '#f5e6c8';
+      ctx.fillRect(Math.floor(x-10), gy-34, 300, 25);
+      // 栏杆
+      ctx.fillStyle = '#fff';
+      for(let i=0;i<18;i++) ctx.fillRect(Math.floor(x-35+i*20), gy-55, 5, 10);
+      // 大红墙
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+10), gy-250, 260, 200);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+18), gy-242, 244, 185);
+      // 大柱子
+      ctx.fillStyle = '#b71c1c';
+      for(let i=0;i<10;i++) ctx.fillRect(Math.floor(x+22+i*25), gy-250, 10, 200);
+      // 大门
+      ctx.fillStyle = '#7f0000';
+      ctx.fillRect(Math.floor(x+100), gy-200, 80, 150);
+      ctx.fillStyle = '#5c0000';
+      ctx.fillRect(Math.floor(x+108), gy-192, 64, 138);
+      // 门钉 7x7
+      ctx.fillStyle = '#ffd700';
+      for(let r=0;r<7;r++) for(let c=0;c<6;c++) ctx.fillRect(Math.floor(x+112+c*10), gy-185+r*16, 6, 6);
+      // 金色屋檐 - 三层
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x-20), gy-275, 320, 25);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x-5), gy-295, 290, 22);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+20), gy-315, 240, 22);
+      // 屋脊
+      ctx.fillStyle = '#ff8f00';
+      ctx.fillRect(Math.floor(x+50), gy-335, 180, 20);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+115), gy-360, 50, 25);
+      // 飞檐翘角
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x-35), gy-268, 25, 8);
+      ctx.fillRect(Math.floor(x+290), gy-268, 25, 8);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x-42), gy-275, 12, 6);
+      ctx.fillRect(Math.floor(x+310), gy-275, 12, 6);
+      // 匾额
+      ctx.fillStyle = '#1a237e';
+      ctx.fillRect(Math.floor(x+88), gy-235, 104, 28);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+98), gy-228, 84, 14);
+      // 窗户
+      ctx.fillStyle = '#7f0000';
+      for(let i=0;i<3;i++) {
+        ctx.fillRect(Math.floor(x+28+i*28), gy-180, 18, 35);
+        ctx.fillRect(Math.floor(x+222+i*28), gy-180, 18, 35);
+      }
+      break;
+    }
+
+    case 2: { // ====== 天坛 - 超大祈年殿 ======
+      // 三层圆台基座
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x+5), gy-30, 230, 30);
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+20), gy-52, 200, 22);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(Math.floor(x+35), gy-70, 170, 18);
+      // 栏杆
+      ctx.fillStyle = '#ddd';
+      for(let i=0;i<12;i++) ctx.fillRect(Math.floor(x+33+i*15), gy-76, 5, 8);
+      // 殿身 - 高大蓝色
+      ctx.fillStyle = '#1565c0';
+      ctx.fillRect(Math.floor(x+55), gy-280, 130, 210);
+      ctx.fillStyle = '#1e88e5';
+      ctx.fillRect(Math.floor(x+62), gy-272, 116, 195);
+      // 大柱子
+      ctx.fillStyle = '#0d47a1';
+      for(let i=0;i<8;i++) ctx.fillRect(Math.floor(x+65+i*15), gy-280, 8, 210);
+      // 门
+      ctx.fillStyle = '#0d47a1';
+      ctx.fillRect(Math.floor(x+90), gy-200, 60, 130);
+      ctx.fillStyle = '#082a6c';
+      ctx.fillRect(Math.floor(x+97), gy-192, 46, 118);
+      // 三层屋檐
+      ctx.fillStyle = '#1565c0';
+      ctx.fillRect(Math.floor(x+35), gy-300, 170, 20);
+      ctx.fillStyle = '#1976d2';
+      ctx.fillRect(Math.floor(x+42), gy-328, 156, 28);
+      ctx.fillStyle = '#2196f3';
+      ctx.fillRect(Math.floor(x+55), gy-358, 130, 30);
+      // 圆顶
+      ctx.fillStyle = '#42a5f5';
+      ctx.fillRect(Math.floor(x+75), gy-390, 90, 32);
+      ctx.fillStyle = '#64b5f6';
+      ctx.fillRect(Math.floor(x+88), gy-415, 64, 25);
+      // 金顶
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+102), gy-435, 36, 20);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+110), gy-450, 20, 15);
+      ctx.fillRect(Math.floor(x+116), gy-460, 8, 10);
+      break;
+    }
+
+    case 3: { // ====== 长城 - 超大 ======
+      // 山脉背景
+      ctx.fillStyle = '#7aaa6a';
+      ctx.beginPath();
+      ctx.moveTo(x-40, gy);
+      ctx.lineTo(x+40, gy-120);
+      ctx.lineTo(x+120, gy-80);
+      ctx.lineTo(x+200, gy-150);
+      ctx.lineTo(x+280, gy-60);
+      ctx.lineTo(x+340, gy);
+      ctx.fill();
+      ctx.fillStyle = '#6a9a5a';
+      ctx.beginPath();
+      ctx.moveTo(x+50, gy);
+      ctx.lineTo(x+100, gy-90);
+      ctx.lineTo(x+180, gy-50);
+      ctx.lineTo(x+250, gy);
+      ctx.fill();
+      // 主城墙
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(Math.floor(x+10), gy-200, 280, 30);
+      ctx.fillStyle = '#999';
+      ctx.fillRect(Math.floor(x+10), gy-170, 280, 170);
+      // 砖纹理
+      ctx.fillStyle = '#bbb';
+      for(let i=0;i<14;i++) for(let j=0;j<14;j++) {
+        ctx.fillRect(Math.floor(x+14+i*20), gy-166+j*12, 17, 10);
+      }
+      ctx.fillStyle = '#888';
+      for(let i=0;i<14;i++) for(let j=0;j<14;j++) {
+        ctx.fillRect(Math.floor(x+14+i*20), gy-165+j*12, 17, 1);
+      }
+      // 大烽火台 - 中央
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(Math.floor(x+110), gy-300, 80, 100);
+      ctx.fillStyle = '#bbb';
+      ctx.fillRect(Math.floor(x+116), gy-292, 68, 85);
+      // 烽火台窗户
+      ctx.fillStyle = '#777';
+      ctx.fillRect(Math.floor(x+124), gy-270, 16, 24);
+      ctx.fillRect(Math.floor(x+160), gy-270, 16, 24);
+      // 城垛
+      ctx.fillStyle = '#bbb';
+      for(let i=0;i<16;i++) ctx.fillRect(Math.floor(x+14+i*18), gy-215, 12, 15);
+      // 烽火台顶垛
+      ctx.fillStyle = '#ccc';
+      for(let i=0;i<5;i++) ctx.fillRect(Math.floor(x+112+i*17), gy-315, 14, 15);
+      // 延伸城墙（两侧）
+      ctx.fillStyle = '#999';
+      ctx.fillRect(Math.floor(x-20), gy-130, 40, 15);
+      ctx.fillRect(Math.floor(x+280), gy-140, 40, 15);
+      ctx.fillStyle = '#bbb';
+      for(let i=0;i<3;i++) ctx.fillRect(Math.floor(x-18+i*14), gy-140, 10, 10);
+      for(let i=0;i<3;i++) ctx.fillRect(Math.floor(x+282+i*14), gy-150, 10, 10);
+      break;
+    }
+
+    case 4: { // ====== 颐和园 - 超大佛香阁+长廊 ======
+      // 万寿山
+      ctx.fillStyle = '#6aaa5a';
+      ctx.beginPath();
+      ctx.moveTo(x-30, gy);
+      ctx.lineTo(x+50, gy-130);
+      ctx.lineTo(x+140, gy-170);
+      ctx.lineTo(x+230, gy-100);
+      ctx.lineTo(x+310, gy);
+      ctx.fill();
+      ctx.fillStyle = '#5a9a4a';
+      ctx.beginPath();
+      ctx.moveTo(x+20, gy);
+      ctx.lineTo(x+80, gy-80);
+      ctx.lineTo(x+160, gy-60);
+      ctx.lineTo(x+250, gy);
+      ctx.fill();
+      // 昆明湖
+      ctx.fillStyle = '#4fc3f7';
+      ctx.fillRect(Math.floor(x-50), gy-20, 180, 22);
+      ctx.fillStyle = '#81d4fa';
+      ctx.fillRect(Math.floor(x-40), gy-14, 80, 8);
+      // 长廊 - 超长
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x-40), gy-85, 220, 8);
+      ctx.fillStyle = '#8B5E3C';
+      for(let i=0;i<18;i++) ctx.fillRect(Math.floor(x-35+i*12), gy-85, 5, 50);
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x-40), gy-35, 220, 8);
+      // 佛香阁 - 超大
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+100), gy-280, 80, 140);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+107), gy-272, 66, 125);
+      // 佛香阁柱子
+      ctx.fillStyle = '#b71c1c';
+      ctx.fillRect(Math.floor(x+110), gy-280, 8, 140);
+      ctx.fillRect(Math.floor(x+162), gy-280, 8, 140);
+      ctx.fillRect(Math.floor(x+136), gy-280, 8, 140);
+      // 三层檐
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+85), gy-300, 110, 15);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+92), gy-322, 96, 22);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+100), gy-348, 80, 26);
+      // 尖顶
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+120), gy-370, 40, 22);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+130), gy-388, 20, 18);
+      ctx.fillRect(Math.floor(x+136), gy-398, 8, 10);
+      // 十七孔桥
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x-30), gy-16, 110, 10);
+      for(let i=0;i<8;i++) {
+        ctx.fillStyle = '#ddd';
+        ctx.fillRect(Math.floor(x-24+i*14), gy-26, 10, 12);
+        ctx.fillStyle = '#ccc';
+        ctx.fillRect(Math.floor(x-21+i*14), gy-30, 4, 4);
+      }
+      break;
+    }
+
+    case 5: { // ====== 鸟巢水立方 - 超大 ======
+      // === 鸟巢 ===
+      ctx.fillStyle = '#78909c';
+      ctx.fillRect(Math.floor(x), gy-200, 130, 170);
+      ctx.fillStyle = '#607d8b';
+      ctx.fillRect(Math.floor(x+6), gy-192, 118, 155);
+      // 钢架网格
+      ctx.fillStyle = '#90a4ae';
+      for(let i=0;i<11;i++) for(let j=0;j<14;j++) {
+        ctx.fillRect(Math.floor(x+9+i*11), gy-188+j*12, 10, 10);
+      }
+      ctx.fillStyle = '#546e7a';
+      for(let i=0;i<11;i++) for(let j=0;j<14;j++) {
+        ctx.fillRect(Math.floor(x+10+i*11), gy-187+j*12, 8, 8);
+      }
+      // 开口
+      ctx.fillStyle = '#455a64';
+      ctx.fillRect(Math.floor(x+20), gy-80, 80, 18);
+      // === 水立方 ===
+      ctx.fillStyle = '#29b6f6';
+      ctx.fillRect(Math.floor(x+140), gy-160, 120, 130);
+      ctx.fillStyle = '#4fc3f7';
+      ctx.fillRect(Math.floor(x+146), gy-154, 108, 118);
+      // 气泡
+      ctx.fillStyle = '#81d4fa';
+      for(let i=0;i<10;i++) for(let j=0;j<9;j++) {
+        ctx.fillRect(Math.floor(x+148+i*11), gy-152+j*13, 10, 12);
+      }
+      ctx.fillStyle = '#29b6f6';
+      for(let i=0;i<10;i++) for(let j=0;j<9;j++) {
+        ctx.fillRect(Math.floor(x+150+i*11), gy-150+j*13, 7, 9);
+      }
+      // 底座
+      ctx.fillStyle = '#555';
+      ctx.fillRect(Math.floor(x-15), gy-18, 290, 18);
+      // 奥运五环
+      const ringY = gy-32;
+      ctx.fillStyle = '#2196f3'; ctx.fillRect(Math.floor(x+30), ringY, 10, 10);
+      ctx.fillStyle = '#ffd700'; ctx.fillRect(Math.floor(x+44), ringY, 10, 10);
+      ctx.fillStyle = '#333';    ctx.fillRect(Math.floor(x+58), ringY, 10, 10);
+      ctx.fillStyle = '#4caf50'; ctx.fillRect(Math.floor(x+37), ringY+8, 10, 10);
+      ctx.fillStyle = '#f44336'; ctx.fillRect(Math.floor(x+51), ringY+8, 10, 10);
+      break;
+    }
+
+    case 6: { // ====== 圆明园 - 超大西洋楼遗址 ======
+      // 背景树丛
+      ctx.fillStyle = '#5aaa4a';
+      ctx.beginPath();
+      ctx.moveTo(x-15, gy);
+      ctx.lineTo(x+60, gy-110);
+      ctx.lineTo(x+150, gy-80);
+      ctx.lineTo(x+250, gy-100);
+      ctx.lineTo(x+290, gy);
+      ctx.fill();
+      // 大水法残柱 - 超大
+      // 柱1
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x+20), gy-280, 22, 240);
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+26), gy-290, 10, 12);
+      // 柱2
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(Math.floor(x+65), gy-240, 22, 200);
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+71), gy-248, 10, 10);
+      // 柱3
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x+110), gy-220, 22, 180);
+      // 柱4
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(Math.floor(x+155), gy-260, 22, 220);
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+161), gy-268, 10, 10);
+      // 柱5
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x+200), gy-230, 22, 190);
+      // 横梁
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+14), gy-295, 80, 12);
+      ctx.fillRect(Math.floor(x+105), gy-232, 80, 12);
+      // 大拱门
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+48), gy-190, 50, 130);
+      ctx.fillStyle = '#ccc';
+      ctx.fillRect(Math.floor(x+54), gy-182, 38, 120);
+      // 拱顶
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(Math.floor(x+56), gy-210, 22, 24);
+      // 碎石
+      ctx.fillStyle = '#bbb';
+      ctx.fillRect(Math.floor(x+35), gy-20, 18, 14);
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(Math.floor(x+100), gy-16, 24, 12);
+      ctx.fillStyle = '#ccc';
+      ctx.fillRect(Math.floor(x+170), gy-22, 26, 16);
+      ctx.fillRect(Math.floor(x+220), gy-14, 20, 10);
+      break;
+    }
+
+    case 7: { // ====== 北海公园 - 超大白塔 ======
+      // 湖面
+      ctx.fillStyle = '#4fc3f7';
+      ctx.fillRect(Math.floor(x-40), gy-18, 340, 20);
+      ctx.fillStyle = '#81d4fa';
+      ctx.fillRect(Math.floor(x-30), gy-12, 110, 8);
+      ctx.fillRect(Math.floor(x+140), gy-10, 120, 6);
+      // 琼华岛
+      ctx.fillStyle = '#6aaa5a';
+      ctx.beginPath();
+      ctx.moveTo(x+30, gy-18);
+      ctx.lineTo(x+70, gy-80);
+      ctx.lineTo(x+120, gy-100);
+      ctx.lineTo(x+170, gy-70);
+      ctx.lineTo(x+200, gy-18);
+      ctx.fill();
+      // 白塔 - 超大
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(Math.floor(x+85), gy-320, 50, 200);
+      ctx.fillStyle = '#f5f5f5';
+      ctx.fillRect(Math.floor(x+90), gy-312, 40, 185);
+      // 塔身圆鼓
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(Math.floor(x+72), gy-200, 76, 70);
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(Math.floor(x+78), gy-194, 64, 58);
+      // 塔座
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(Math.floor(x+65), gy-130, 90, 30);
+      // 塔顶
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+98), gy-345, 24, 25);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+104), gy-368, 12, 23);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+107), gy-380, 6, 12);
+      // 小亭子
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+20), gy-110, 36, 40);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+14), gy-122, 48, 14);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+28), gy-134, 16, 12);
+      // 右侧亭
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+180), gy-95, 30, 35);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+175), gy-106, 40, 12);
+      // 桥
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillRect(Math.floor(x+195), gy-22, 55, 10);
+      for(let i=0;i<5;i++) {
+        ctx.fillStyle = '#ddd';
+        ctx.fillRect(Math.floor(x+197+i*11), gy-30, 8, 12);
+      }
+      break;
+    }
+
+    case 8: { // ====== 雍和宫 - 超大 ======
+      // 院墙
+      ctx.fillStyle = '#a0522d';
+      ctx.fillRect(Math.floor(x-15), gy-40, 290, 40);
+      ctx.fillStyle = '#c0713d';
+      ctx.fillRect(Math.floor(x), gy-32, 260, 28);
+      // 主殿
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+40), gy-270, 180, 230);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+48), gy-262, 164, 215);
+      // 柱子
+      ctx.fillStyle = '#b71c1c';
+      for(let i=0;i<8;i++) ctx.fillRect(Math.floor(x+52+i*22), gy-270, 10, 230);
+      // 门
+      ctx.fillStyle = '#7f0000';
+      ctx.fillRect(Math.floor(x+95), gy-180, 70, 140);
+      ctx.fillStyle = '#5c0000';
+      ctx.fillRect(Math.floor(x+102), gy-172, 56, 128);
+      // 门钉
+      ctx.fillStyle = '#ffd700';
+      for(let r=0;r<7;r++) for(let c=0;c<5;c++) ctx.fillRect(Math.floor(x+106+c*10), gy-166+r*15, 6, 6);
+      // 金顶三层
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+25), gy-295, 210, 25);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+38), gy-325, 184, 30);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+60), gy-355, 140, 30);
+      // 宝顶
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+100), gy-380, 60, 25);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+115), gy-400, 30, 20);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+124), gy-415, 12, 15);
+      // 经幡
+      ctx.fillStyle = '#e91e63';
+      ctx.fillRect(Math.floor(x+15), gy-240, 8, 190);
+      ctx.fillStyle = '#26c6da';
+      ctx.fillRect(Math.floor(x+237), gy-240, 8, 190);
+      // 转经筒
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+12), gy-140, 16, 30);
+      ctx.fillRect(Math.floor(x+232), gy-140, 16, 30);
+      // 窗户
+      ctx.fillStyle = '#7f0000';
+      for(let i=0;i<2;i++) {
+        ctx.fillRect(Math.floor(x+56+i*25), gy-180, 16, 30);
+        ctx.fillRect(Math.floor(x+190+i*25), gy-180, 16, 30);
+      }
+      break;
+    }
+
+    case 9: { // ====== 景山公园 - 超大山体+五亭 ======
+      // 大山体
+      ctx.fillStyle = '#5aaa4a';
+      ctx.beginPath();
+      ctx.moveTo(x-30, gy);
+      ctx.lineTo(x+40, gy-110);
+      ctx.lineTo(x+100, gy-180);
+      ctx.lineTo(x+170, gy-100);
+      ctx.lineTo(x+240, gy);
+      ctx.fill();
+      ctx.fillStyle = '#4a9a3a';
+      ctx.beginPath();
+      ctx.moveTo(x+10, gy);
+      ctx.lineTo(x+65, gy-75);
+      ctx.lineTo(x+130, gy-55);
+      ctx.lineTo(x+195, gy);
+      ctx.fill();
+      // 树木装饰
+      ctx.fillStyle = '#3a8a2a';
+      for(let i=0;i<8;i++) {
+        const tx = x + 20 + i*28;
+        const ty = gy - 30 - Math.sin(i*0.8)*50;
+        ctx.fillRect(Math.floor(tx), Math.floor(ty), 14, 14);
+        ctx.fillRect(Math.floor(tx+3), Math.floor(ty+14), 8, 10);
+      }
+      // 万春亭（中央大亭）
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+75), gy-250, 60, 70);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+80), gy-244, 50, 58);
+      // 柱子
+      ctx.fillStyle = '#b71c1c';
+      ctx.fillRect(Math.floor(x+82), gy-250, 8, 70);
+      ctx.fillRect(Math.floor(x+120), gy-250, 8, 70);
+      // 屋顶
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+62), gy-270, 86, 18);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+70), gy-290, 70, 20);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+85), gy-312, 40, 22);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+98), gy-328, 14, 16);
+      // 左侧亭
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+20), gy-150, 36, 40);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+14), gy-165, 48, 15);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+26), gy-178, 24, 13);
+      // 右侧亭
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+170), gy-140, 36, 40);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+164), gy-155, 48, 15);
+      ctx.fillStyle = '#ffd54f';
+      ctx.fillRect(Math.floor(x+176), gy-168, 24, 13);
+      // 石阶
+      ctx.fillStyle = '#e0e0e0';
+      for(let i=0;i<12;i++) ctx.fillRect(Math.floor(x+88), gy-175+i*15, 34, 5);
+      break;
+    }
+
+    case 10: { // ====== 国子监 - 超大 ======
+      // 围墙
+      ctx.fillStyle = '#a08060';
+      ctx.fillRect(Math.floor(x-15), gy-40, 290, 40);
+      ctx.fillStyle = '#c09870';
+      ctx.fillRect(Math.floor(x), gy-32, 260, 28);
+      // 大门
+      ctx.fillStyle = '#8B5E3C';
+      ctx.fillRect(Math.floor(x+80), gy-200, 100, 160);
+      ctx.fillStyle = '#6d4c41';
+      ctx.fillRect(Math.floor(x+88), gy-192, 84, 148);
+      ctx.fillStyle = '#4e342e';
+      ctx.fillRect(Math.floor(x+96), gy-178, 68, 130);
+      // 门钉
+      ctx.fillStyle = '#ffd700';
+      for(let r=0;r<7;r++) for(let c=0;c<5;c++) ctx.fillRect(Math.floor(x+100+c*12), gy-170+r*16, 7, 7);
+      // 侧殿左
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+5), gy-170, 70, 130);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+12), gy-162, 56, 118);
+      // 侧殿右
+      ctx.fillStyle = '#e63946';
+      ctx.fillRect(Math.floor(x+185), gy-170, 70, 130);
+      ctx.fillStyle = '#ef5350';
+      ctx.fillRect(Math.floor(x+192), gy-162, 56, 118);
+      // 蓝色琉璃瓦屋顶
+      ctx.fillStyle = '#3f51b5';
+      ctx.fillRect(Math.floor(x-2), gy-188, 80, 18);
+      ctx.fillStyle = '#5c6bc0';
+      ctx.fillRect(Math.floor(x+8), gy-206, 60, 18);
+      ctx.fillStyle = '#3f51b5';
+      ctx.fillRect(Math.floor(x+178), gy-188, 80, 18);
+      ctx.fillStyle = '#5c6bc0';
+      ctx.fillRect(Math.floor(x+188), gy-206, 60, 18);
+      // 辟雍大殿
+      ctx.fillStyle = '#3f51b5';
+      ctx.fillRect(Math.floor(x+85), gy-245, 90, 45);
+      ctx.fillStyle = '#5c6bc0';
+      ctx.fillRect(Math.floor(x+72), gy-268, 116, 23);
+      ctx.fillStyle = '#7986cb';
+      ctx.fillRect(Math.floor(x+80), gy-288, 100, 20);
+      // 宝顶
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+115), gy-305, 30, 17);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(Math.floor(x+124), gy-318, 12, 13);
+      // 泮池（圆形水池）
+      ctx.fillStyle = '#4fc3f7';
+      ctx.fillRect(Math.floor(x+50), gy-24, 160, 26);
+      ctx.fillStyle = '#81d4fa';
+      ctx.fillRect(Math.floor(x+70), gy-18, 50, 10);
+      // 匾额
+      ctx.fillStyle = '#1a237e';
+      ctx.fillRect(Math.floor(x+90), gy-190, 80, 20);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(Math.floor(x+100), gy-186, 60, 12);
+      break;
+    }
+  }
+}
+
+// ========== 像素猫角色 ==========
+function drawCat() {
+  const px0 = Math.floor(player.x - camera.x);
+  const py0 = Math.floor(player.y);
+  const d = player.dir;
+  const f = player.frame;
+  const s = 2;
+
+  ctx.save();
+  if(d === -1) {
+    ctx.translate(px0 + player.w, py0);
+    ctx.scale(-1, 1);
+  } else {
+    ctx.translate(px0, py0);
+  }
+
+  // 猫耳朵
+  ctx.fillStyle = '#ff9800';
+  ctx.fillRect(1*s, 0, 3*s, 3*s);
+  ctx.fillRect(8*s, 0, 3*s, 3*s);
+  ctx.fillStyle = '#ffb74d';
+  ctx.fillRect(2*s, 0, 1*s, 3*s);
+  ctx.fillRect(9*s, 0, 1*s, 3*s);
+  ctx.fillStyle = '#ff80ab';
+  ctx.fillRect(2*s, 1*s, 1*s, 1*s);
+  ctx.fillRect(9*s, 1*s, 1*s, 1*s);
+
+  // 头部
+  ctx.fillStyle = '#ff9800';
+  ctx.fillRect(1*s, 3*s, 10*s, 7*s);
+  ctx.fillRect(0, 4*s, 12*s, 5*s);
+  // 脸部浅色
+  ctx.fillStyle = '#ffe0b2';
+  ctx.fillRect(3*s, 6*s, 6*s, 4*s);
+  // 大眼睛
+  ctx.fillStyle = '#4caf50';
+  ctx.fillRect(3*s, 5*s, 2*s, 2*s);
+  ctx.fillRect(7*s, 5*s, 2*s, 2*s);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(3*s, 5*s, 1*s, 2*s);
+  ctx.fillRect(8*s, 5*s, 1*s, 2*s);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(4*s, 5*s, 1*s, 1*s);
+  ctx.fillRect(8*s, 5*s, 1*s, 1*s);
+  // 鼻子
+  ctx.fillStyle = '#ff80ab';
+  ctx.fillRect(5*s, 8*s, 2*s, 1*s);
+  // 嘴
+  ctx.fillStyle = '#795548';
+  ctx.fillRect(5*s, 9*s, 1*s, 1*s);
+  ctx.fillRect(6*s, 9*s, 1*s, 1*s);
+  // 胡须
+  ctx.fillStyle = '#795548';
+  ctx.fillRect(0, 7*s, 2*s, 1*s);
+  ctx.fillRect(0, 9*s, 2*s, 1*s);
+  ctx.fillRect(10*s, 7*s, 2*s, 1*s);
+  ctx.fillRect(10*s, 9*s, 2*s, 1*s);
+
+  // 身体
+  ctx.fillStyle = '#ff9800';
+  ctx.fillRect(2*s, 10*s, 8*s, 5*s);
+  ctx.fillStyle = '#ffe0b2';
+  ctx.fillRect(4*s, 11*s, 4*s, 3*s);
+  // 项圈
+  ctx.fillStyle = '#e91e63';
+  ctx.fillRect(2*s, 10*s, 8*s, 1*s);
+  ctx.fillStyle = '#ffd700';
+  ctx.fillRect(5*s, 10*s, 2*s, 1*s);
+
+  // 尾巴
+  ctx.fillStyle = '#ff9800';
+  const tw = f % 2 === 0 ? 0 : 1;
+  ctx.fillRect(10*s, 11*s+tw*s, 2*s, 2*s);
+  ctx.fillRect(11*s, 10*s+tw*s, 2*s, 2*s);
+  ctx.fillRect(12*s, 9*s+tw*s, 1*s, 2*s);
+
+  // 腿
+  const lo1 = (f === 1) ? 2 : (f === 3) ? -1 : 0;
+  const lo2 = (f === 1) ? -1 : (f === 3) ? 2 : 0;
+  ctx.fillStyle = '#ff9800';
+  ctx.fillRect(3*s, 15*s+lo1, 2*s, 2*s);
+  ctx.fillRect(7*s, 15*s+lo2, 2*s, 2*s);
+  ctx.fillStyle = '#ffe0b2';
+  ctx.fillRect(3*s, 17*s+lo1, 2*s, 1*s);
+  ctx.fillRect(7*s, 17*s+lo2, 2*s, 1*s);
+
+  ctx.restore();
+
+  // 交互感叹号
+  if(nearSpot) {
+    const bx = px0 + 2;
+    const by = py0 - 18;
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(bx, by, 16, 16);
+    ctx.fillStyle = '#ff8f00';
+    ctx.fillRect(bx+2, by+2, 12, 12);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Courier New';
+    ctx.fillText('!', bx+5, by+13);
+  }
+}
+
+// 收集星标
+function drawCollectedMark(spot) {
+  const x = spot.x - camera.x + spot.w/2;
+  if(x < -20 || x > W + 20) return;
+  if(collected.has(spot.id)) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 20px Courier New';
+    ctx.fillText('★', x-8, 25);
+  }
+}
+
+// 终点旗
+function drawFlag() {
+  const fx = MAP_WIDTH - 200 - camera.x;
+  if(fx < -60 || fx > W + 60) return;
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(Math.floor(MAP_WIDTH-200-camera.x), GROUND_Y-180, 8, 180);
+  ctx.fillStyle = '#ff80ab';
+  ctx.fillRect(Math.floor(MAP_WIDTH-192-camera.x), GROUND_Y-180, 65, 42);
+  ctx.fillStyle = '#ff4081';
+  ctx.fillRect(Math.floor(MAP_WIDTH-188-camera.x), GROUND_Y-176, 57, 34);
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 18px Courier New';
+  ctx.fillText('GOAL', Math.floor(MAP_WIDTH-184-camera.x), GROUND_Y-152);
+  ctx.fillStyle = '#888';
+  ctx.fillRect(Math.floor(MAP_WIDTH-215-camera.x), GROUND_Y-10, 40, 10);
+  ctx.fillStyle = '#ff69b4';
+  ctx.fillRect(Math.floor(MAP_WIDTH-220-camera.x), GROUND_Y-6, 8, 8);
+  ctx.fillStyle = '#ffdd57';
+  ctx.fillRect(Math.floor(MAP_WIDTH-174-camera.x), GROUND_Y-6, 8, 8);
+}
+
+// 飘落花瓣
+function updatePetals() {
+  petals.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    if(p.y > GROUND_Y) { p.y = -10; p.x = camera.x + Math.random() * W; }
+    if(p.x < camera.x - 50) p.x = camera.x + W + 20;
+  });
+}
+
+function drawPetals() {
+  petals.forEach(p => {
+    const sx = p.x - camera.x;
+    if(sx < -10 || sx > W + 10) return;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(Math.floor(sx), Math.floor(p.y), Math.floor(p.size), Math.floor(p.size));
+  });
+}
+
+// ========== 主循环 ==========
+function update() {
+  if(gameOver) return;
+  player.moving = false;
+  if(keys['arrowright']||keys['d']) { player.x += player.speed; player.dir = 1; player.moving = true; }
+  if(keys['arrowleft']||keys['a']) { player.x -= player.speed; player.dir = -1; player.moving = true; }
+  player.x = Math.max(0, Math.min(MAP_WIDTH-30, player.x));
+
+  if(player.moving) {
+    player.walkTimer++;
+    if(player.walkTimer % 8 === 0) player.frame = (player.frame + 1) % 4;
+  } else { player.frame = 0; }
+
+  // 确保猫始终在地面上
+  player.y = GROUND_Y - CAT_H;
+
+  camera.x = Math.max(0, Math.min(MAP_WIDTH-W, player.x - 350));
+
+  // 检测景点
+  nearSpot = null;
+  const pcx = player.x + player.w/2;
+  for(const s of spots) {
+    if(pcx >= s.x - 30 && pcx <= s.x + s.w + 30) { nearSpot = s; break; }
+  }
+  document.getElementById('interact-hint').style.display = nearSpot ? 'block' : 'none';
+
+  const prog = Math.floor(player.x / MAP_WIDTH * 100);
+  let loc = '起点';
+  if(prog>5) loc='故宫区域';
+  if(prog>15) loc='天坛区域';
+  if(prog>24) loc='长城脚下';
+  if(prog>33) loc='颐和园旁';
+  if(prog>42) loc='奥运园区';
+  if(prog>51) loc='圆明园';
+  if(prog>60) loc='北海公园';
+  if(prog>68) loc='雍和宫';
+  if(prog>77) loc='景山公园';
+  if(prog>85) loc='国子监';
+  document.getElementById('location').textContent = loc;
+
+  if(player.x >= MAP_WIDTH - 210) showClear('走到地图终点！');
+  updatePetals();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  drawSky();
+  drawClouds();
+  drawMountains();
+  drawPetals();
+
+  // 樱花树
+  const sakuraPos = [
+    {x:170,s:1.3},{x:580,s:1.1},{x:1050,s:1.4},{x:1520,s:1.2},
+    {x:1960,s:1.3},{x:2430,s:1.1},{x:2870,s:1.4},{x:3310,s:1.2},
+    {x:3740,s:1.3},{x:4150,s:1.1},{x:4550,s:1.4},{x:4850,s:1.2}
+  ];
+  sakuraPos.forEach(t => drawSakuraTree(t.x, GROUND_Y, t.s));
+
+  // 花丛
+  const flowerPos = [100,250,480,680,920,1150,1380,1620,1850,2080,2320,2550,2780,3010,3240,3470,3700,3930,4160,4400,4650,4900];
+  flowerPos.forEach(fx => drawFlowerPatch(fx, GROUND_Y));
+
+  // 景点建筑
+  spots.forEach(s => { drawSpotBuilding(s); drawCollectedMark(s); });
+
+  drawFlag();
+  drawGround();
+  drawCat();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function interact() { if(nearSpot) showModal(nearSpot); }
+
+function showModal(spot) {
+  document.getElementById('modalTitle').textContent = '🌸 ' + spot.name;
+  var imgEl = document.getElementById('modalImage');
+  imgEl.style.display = 'block';
+  imgEl.onerror = function() {
+    this.style.display = 'none';
+    showPixelFallback(spot);
+  };
+  imgEl.src = spot.img;
+  document.getElementById('modalDesc').textContent = spot.desc;
+  document.getElementById('modal').classList.add('active');
+  if(!collected.has(spot.id)) {
+    collected.add(spot.id);
+    document.getElementById('collected').textContent = collected.size;
+    if(collected.size >= 10) setTimeout(() => { closeModal(); showClear('收集全部10个景点！'); }, 500);
+  }
+}
+function showPixelFallback(spot) {
+  var existing = document.getElementById('pixelFallback');
+  if(existing) existing.remove();
+  var icons = {1:'🏯',2:'🛕',3:'🧱',4:'🌿',5:'🏟️',6:'🏚️',7:'⛵',8:'🕉️',9:'⛰️',10:'📚'};
+  var colors = {1:'#e63946',2:'#1565c0',3:'#6a9a5a',4:'#2e7d32',5:'#546e7a',6:'#8d6e63',7:'#0288d1',8:'#ff8f00',9:'#388e3c',10:'#3f51b5'};
+  var c = colors[spot.id] || '#e63946';
+  var e = icons[spot.id] || '🏯';
+  var div = document.createElement('div');
+  div.id = 'pixelFallback';
+  div.style.cssText = 'width:100%;height:180px;border:3px solid #8a5070;margin-bottom:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,'+c+'44,#ffc8dd66,#e8f5e144);position:relative;overflow:hidden';
+  div.innerHTML = '<div style="font-size:60px;margin-bottom:8px;text-shadow:0 0 20px '+c+'88">'+e+'</div><div style="color:#ffdd57;font-size:1.2rem;font-weight:bold;letter-spacing:4px;text-shadow:2px 2px #1a0a1a">'+spot.name+'</div><div style="color:#e8c0d0;font-size:0.7rem;margin-top:6px">📍 北京</div>';
+  document.getElementById('modalImage').parentNode.insertBefore(div, document.getElementById('modalImage'));
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('active');
+  var fb = document.getElementById('pixelFallback');
+  if(fb) fb.remove();
+}
+function showClear(msg) {
+  gameOver = true;
+  document.getElementById('clearMsg').textContent = msg + ' 已收集 ' + collected.size + '/10 个景点 🌸';
+  document.getElementById('clearScreen').classList.add('active');
+}
+function restartGame() {
+  gameOver = false;
+  player.x = 60; player.y = GROUND_Y - CAT_H;
+  collected.clear();
+  document.getElementById('collected').textContent = '0';
+  document.getElementById('clearScreen').classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if(e.key.toLowerCase()==='e'||e.key==='Enter') interact();
+  if(e.key==='Escape') closeModal();
+  e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+canvas.addEventListener('click', e => { if(nearSpot) interact(); });
+document.getElementById('modal').addEventListener('click', e => { if(e.target===document.getElementById('modal')) closeModal(); });
+
+gameLoop();
+</script>
+</body>
+</html>
